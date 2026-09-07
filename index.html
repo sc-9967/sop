@@ -94,13 +94,11 @@
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e3a5f;color:#fff;padding:10px 24px;border-radius:10px;font-size:.88rem;font-weight:600;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.show{opacity:1}
   .loading-msg{text-align:center;padding:40px;color:var(--gray);font-size:.9rem}
-  .print-header{display:none}
   @media print{
     header,nav,.toolbar,.modal-actions,.detail-actions,.toast,.login-overlay,.btn-close,.btn-chiudi,#mainContent{display:none!important}
     body{background:#fff;overflow:visible!important;height:auto!important}
     .overlay.open{position:static;background:none;display:block!important;overflow:visible!important;height:auto!important}
     .modal{position:static;max-height:none!important;overflow:visible!important;width:100%;box-shadow:none;padding:0;border-radius:0;height:auto!important}
-    .print-header{display:none!important}
     .sop-content{background:#fff;border:1px solid #ccc;overflow:visible!important;height:auto!important;page-break-inside:auto}
     #detailContent{overflow:visible!important;height:auto!important}
     *{overflow:visible!important}
@@ -153,13 +151,13 @@
   <div class="modal">
     <button class="btn-close" onclick="closeModal()">✕</button>
     <h2 id="modalTitle">Nuova Procedura Operativa</h2>
-    <div class="form-group"><label>Titolo *</label><input id="fTitle" placeholder="es. Cambio filtri a sacco sala infusioni"></div>
+    <div class="form-group"><label>Titolo *</label><input id="fTitle"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>Area *</label><select id="fArea"><option>Sala Infusioni</option><option>Sala Sciroppi</option><option value="Comune (entrambe)">Comune (entrambe)</option></select></div>
       <div class="form-group"><label>Tipo</label><select id="fTipo"><option>Cambio componente</option><option>Avvio produzione</option><option>Ripartenza</option><option>CIP / Pulizia</option><option>Manutenzione</option><option>Controllo qualità</option><option>Altro</option></select></div>
     </div>
     <div class="form-group"><label>Frequenza</label><select id="fFreq"><option>Ogni turno</option><option>Giornaliera</option><option>Settimanale</option><option>Mensile</option><option>A ogni cambio formato</option><option>A ogni cambio produzione</option><option>Su richiesta / Occasionale</option><option>Straordinaria</option></select></div>
-    <div class="form-group"><label>Descrivi l'operazione</label><textarea id="fDesc" placeholder="Descrivi cosa fa l'operatore..."></textarea></div>
+    <div class="form-group"><label>Descrivi l'operazione</label><textarea id="fDesc"></textarea></div>
     <button class="btn-ai" id="btnGenerate" onclick="generateSOP()">✨ Genera SOP con AI</button>
     <div class="ai-result" id="aiResult"></div>
     <div class="form-group"><label>Stato</label><select id="fStato"><option value="bozza">Bozza</option><option value="approvata">Approvata</option><option value="obsoleta">Obsoleta</option></select></div>
@@ -170,179 +168,36 @@
   <div class="modal"><button class="btn-close" onclick="closeDetail()">✕</button><div id="detailContent"></div></div>
 </div>
 <script>
-var ADMIN_PIN = "1234";
-var CREATOR = "Silvio Chiaverini";
-var DATA_URL = "https://raw.githubusercontent.com/silviochiaverini-9967/sop-manager/main/data.json";
-
-var procedures = [];
-var currentPage = 'dashboard';
-var editingId = null;
-var generatedContent = '';
-var currentRole = null;
-
-document.getElementById('hdrDate').textContent = new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-
-// Carica data.json da GitHub
+var ADMIN_PIN="1234";
+var CREATOR="Silvio Chiaverini";
+var procedures=[];
+var currentPage='dashboard';
+var editingId=null;
+var generatedContent='';
+var currentRole=null;
+document.getElementById('hdrDate').textContent=new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 async function loadData(){
-  try {
-    var res = await fetch(DATA_URL + '?t=' + Date.now());
-    procedures = await res.json();
-  } catch(e){
-    procedures = [];
-    showToast('❌ Errore caricamento procedure');
-  }
+  try{var r=await fetch('data.json?t='+Date.now());procedures=await r.json();}
+  catch(e){procedures=[];showToast('❌ Errore caricamento procedure');}
 }
-
-function showToast(msg,d){d=d||3000;var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},d);}
+function showToast(m,d){d=d||3000;var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},d);}
 function showPin(){document.getElementById('pinArea').style.display='block';document.getElementById('pinInput').focus();}
-function checkPin(){
-  if(document.getElementById('pinInput').value===ADMIN_PIN){loginAs('admin');}
-  else{document.getElementById('pinError').style.display='block';document.getElementById('pinInput').value='';}
-}
-async function loginAs(role){
-  currentRole=role;
-  document.getElementById('loginOverlay').style.display='none';
-  var badge=document.getElementById('roleBadge');
-  badge.textContent=role==='admin'?'🔐 Amministratore':'👷 Operatore';
-  badge.className='role-badge '+(role==='admin'?'admin':'operator');
-  document.getElementById('btnNuova').disabled=role!=='admin';
-  await loadData();
-  showPage('dashboard');
-}
-function logout(){
-  currentRole=null;
-  document.getElementById('pinInput').value='';
-  document.getElementById('pinError').style.display='none';
-  document.getElementById('pinArea').style.display='none';
-  document.getElementById('loginOverlay').style.display='flex';
-}
-function showPage(p){
-  currentPage=p;
-  document.querySelectorAll('nav > button').forEach(function(b,i){b.classList.toggle('active',['dashboard','procedure'][i]===p);});
-  if(p==='dashboard') renderDashboard(); else renderProcedure();
-}
-function md(text){
-  if(!text) return '';
-  var t=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  t=t.replace(/^---+\s*$/gm,'').replace(/\n{3,}/g,'\n\n');
-  t=t.replace(/^### (.+)$/gm,'<strong style="color:#16a34a;font-size:.95rem">$1</strong>');
-  t=t.replace(/^## (.+)$/gm,'<strong style="color:#2563eb;font-size:1rem">$1</strong>');
-  t=t.replace(/^# (.+)$/gm,'<strong style="color:#dc2626;font-size:1.05rem">$1</strong>');
-  t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  t=t.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>');
-  return t;
-}
-function renderDashboard(){
-  var total=procedures.length,approvate=procedures.filter(function(p){return p.stato==='approvata';}).length,bozze=procedures.filter(function(p){return p.stato==='bozza';}).length;
-  var inf=procedures.filter(function(p){return p.area==='Sala Infusioni';}),sci=procedures.filter(function(p){return p.area==='Sala Sciroppi';}),com=procedures.filter(function(p){return p.area==='Comune (entrambe)';});
-  document.getElementById('mainContent').innerHTML=
-    '<div class="stats">'+
-    '<div class="stat-card"><div class="num">'+total+'</div><div class="lbl">Totali</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:var(--green)">'+approvate+'</div><div class="lbl">Approvate</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:#a16207">'+bozze+'</div><div class="lbl">Bozze</div></div>'+
-    '<div class="stat-card"><div class="num" style="color:var(--gray)">'+(total-approvate-bozze)+'</div><div class="lbl">Obsolete</div></div>'+
-    '</div>'+
-    '<div class="area-cards">'+
-    '<div class="area-card infusioni"><h3>🫖 Sala Infusioni ('+(inf.length+com.length)+')</h3>'+
-    ([].concat(inf,com).slice(0,8).map(function(p){return '<div class="proc-mini" onclick="openDetail(\''+p.id+'\')"><span>'+p.title+'</span><span class="badge '+p.stato+'">'+p.stato+'</span></div>';}).join('')||'<p style="color:var(--gray);font-size:.83rem;padding:8px 0">Nessuna procedura</p>')+
-    '</div>'+
-    '<div class="area-card sciroppi"><h3>🍯 Sala Sciroppi ('+(sci.length+com.length)+')</h3>'+
-    ([].concat(sci,com).slice(0,8).map(function(p){return '<div class="proc-mini" onclick="openDetail(\''+p.id+'\')"><span>'+p.title+'</span><span class="badge '+p.stato+'">'+p.stato+'</span></div>';}).join('')||'<p style="color:var(--gray);font-size:.83rem;padding:8px 0">Nessuna procedura</p>')+
-    '</div></div>';
-}
-function renderProcedure(filter,areaFilter){
-  filter=filter||'';areaFilter=areaFilter||'';
-  var filtered=procedures.filter(function(p){
-    var mt=!filter||p.title.toLowerCase().indexOf(filter.toLowerCase())>=0||(p.content&&p.content.toLowerCase().indexOf(filter.toLowerCase())>=0);
-    var ma=!areaFilter||p.area===areaFilter;
-    return mt&&ma;
-  });
-  var isAdmin=currentRole==='admin';
-  var html='<div class="toolbar"><input id="searchInput" placeholder="🔍 Cerca…" oninput="renderProcedure(this.value,document.getElementById(\'areaFilter\').value)" value="'+filter+'"><select id="areaFilter" onchange="renderProcedure(document.getElementById(\'searchInput\').value,this.value)"><option value="">Tutte le aree</option><option>Sala Infusioni</option><option>Sala Sciroppi</option><option value="Comune (entrambe)">Comune</option></select>';
-  if(isAdmin) html+='<button class="btn-new" onclick="openNewModal()">➕ Nuova SOP</button>';
-  html+='</div><div class="proc-table"><div class="proc-row header"><span>Titolo</span><span>Area</span><span>Tipo</span><span>Stato</span><span></span></div>';
-  if(filtered.length===0){html+='<div style="padding:24px;text-align:center;color:var(--gray)">Nessuna procedura</div>';}
-  else{filtered.forEach(function(p){
-    html+='<div class="proc-row" onclick="openDetail(\''+p.id+'\')"><div><div class="proc-title">'+p.title+'</div><div class="proc-date">📅 '+p.date+' · '+p.creator+'</div></div><span class="proc-area" style="font-size:.8rem;color:var(--gray)">'+p.area+'</span><span class="proc-tipo" style="font-size:.8rem;color:var(--gray)">'+p.tipo+'</span><span class="badge '+p.stato+'">'+p.stato+'</span><div onclick="event.stopPropagation()">'+(isAdmin?'<button class="btn-icon" onclick="openEditModal(\''+p.id+'\')">✏️</button><button class="btn-icon" onclick="deleteProc(\''+p.id+'\')">🗑️</button>':'—')+'</div></div>';
-  });}
-  html+='</div>';
-  document.getElementById('mainContent').innerHTML=html;
-}
-function openNewModal(){
-  if(currentRole!=='admin') return;
-  editingId=null;generatedContent='';
-  document.getElementById('modalTitle').textContent='Nuova Procedura Operativa';
-  document.getElementById('fTitle').value='';document.getElementById('fDesc').value='';
-  document.getElementById('fStato').value='bozza';
-  document.getElementById('aiResult').style.display='none';document.getElementById('aiResult').innerHTML='';
-  document.getElementById('sopModal').classList.add('open');
-}
-function openEditModal(id){
-  if(currentRole!=='admin') return;
-  var p=procedures.find(function(x){return x.id===id;});if(!p) return;
-  editingId=id;generatedContent=p.content;
-  document.getElementById('modalTitle').textContent='Modifica Procedura';
-  document.getElementById('fTitle').value=p.title;
-  document.getElementById('fArea').value=p.area;
-  document.getElementById('fTipo').value=p.tipo;
-  document.getElementById('fFreq').value=p.freq||'Ogni turno';
-  document.getElementById('fDesc').value=p.desc||'';
-  document.getElementById('fStato').value=p.stato;
-  var el=document.getElementById('aiResult');
-  el.innerHTML=p.content?md(p.content):'';el.style.display=p.content?'block':'none';
-  document.getElementById('sopModal').classList.add('open');
-}
+function checkPin(){if(document.getElementById('pinInput').value===ADMIN_PIN){loginAs('admin');}else{document.getElementById('pinError').style.display='block';document.getElementById('pinInput').value='';}}
+async function loginAs(r){currentRole=r;document.getElementById('loginOverlay').style.display='none';var b=document.getElementById('roleBadge');b.textContent=r==='admin'?'🔐 Amministratore':'👷 Operatore';b.className='role-badge '+(r==='admin'?'admin':'operator');document.getElementById('btnNuova').disabled=r!=='admin';await loadData();showPage('dashboard');}
+function logout(){currentRole=null;document.getElementById('pinInput').value='';document.getElementById('pinError').style.display='none';document.getElementById('pinArea').style.display='none';document.getElementById('loginOverlay').style.display='flex';}
+function showPage(p){currentPage=p;document.querySelectorAll('nav > button').forEach(function(b,i){b.classList.toggle('active',['dashboard','procedure'][i]===p);});if(p==='dashboard')renderDashboard();else renderProcedure();}
+function md(t){if(!t)return '';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');t=t.replace(/^---+\s*$/gm,'').replace(/\n{3,}/g,'\n\n');t=t.replace(/^### (.+)$/gm,'<strong style="color:#16a34a;font-size:.95rem">$1</strong>');t=t.replace(/^## (.+)$/gm,'<strong style="color:#2563eb;font-size:1rem">$1</strong>');t=t.replace(/^# (.+)$/gm,'<strong style="color:#dc2626;font-size:1.05rem">$1</strong>');t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');t=t.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>');return t;}
+function renderDashboard(){var total=procedures.length,ap=procedures.filter(function(p){return p.stato==='approvata';}).length,bz=procedures.filter(function(p){return p.stato==='bozza';}).length;var inf=procedures.filter(function(p){return p.area==='Sala Infusioni';}),sci=procedures.filter(function(p){return p.area==='Sala Sciroppi';}),com=procedures.filter(function(p){return p.area==='Comune (entrambe)';});document.getElementById('mainContent').innerHTML='<div class="stats"><div class="stat-card"><div class="num">'+total+'</div><div class="lbl">Totali</div></div><div class="stat-card"><div class="num" style="color:var(--green)">'+ap+'</div><div class="lbl">Approvate</div></div><div class="stat-card"><div class="num" style="color:#a16207">'+bz+'</div><div class="lbl">Bozze</div></div><div class="stat-card"><div class="num" style="color:var(--gray)">'+(total-ap-bz)+'</div><div class="lbl">Obsolete</div></div></div><div class="area-cards"><div class="area-card infusioni"><h3>🫖 Sala Infusioni ('+(inf.length+com.length)+')</h3>'+([].concat(inf,com).slice(0,8).map(function(p){return '<div class="proc-mini" onclick="openDetail(\''+p.id+'\')"><span>'+p.title+'</span><span class="badge '+p.stato+'">'+p.stato+'</span></div>';}).join('')||'<p style="color:var(--gray);font-size:.83rem;padding:8px 0">Nessuna procedura</p>')+'</div><div class="area-card sciroppi"><h3>🍯 Sala Sciroppi ('+(sci.length+com.length)+')</h3>'+([].concat(sci,com).slice(0,8).map(function(p){return '<div class="proc-mini" onclick="openDetail(\''+p.id+'\')"><span>'+p.title+'</span><span class="badge '+p.stato+'">'+p.stato+'</span></div>';}).join('')||'<p style="color:var(--gray);font-size:.83rem;padding:8px 0">Nessuna procedura</p>')+'</div></div>';}
+function renderProcedure(f,a){f=f||'';a=a||'';var fl=procedures.filter(function(p){return(!f||p.title.toLowerCase().indexOf(f.toLowerCase())>=0||(p.content&&p.content.toLowerCase().indexOf(f.toLowerCase())>=0))&&(!a||p.area===a);});var ia=currentRole==='admin';var h='<div class="toolbar"><input id="searchInput" placeholder="🔍 Cerca…" oninput="renderProcedure(this.value,document.getElementById(\'areaFilter\').value)" value="'+f+'"><select id="areaFilter" onchange="renderProcedure(document.getElementById(\'searchInput\').value,this.value)"><option value="">Tutte le aree</option><option>Sala Infusioni</option><option>Sala Sciroppi</option><option value="Comune (entrambe)">Comune</option></select>';if(ia)h+='<button class="btn-new" onclick="openNewModal()">➕ Nuova SOP</button>';h+='</div><div class="proc-table"><div class="proc-row header"><span>Titolo</span><span>Area</span><span>Tipo</span><span>Stato</span><span></span></div>';if(fl.length===0)h+='<div style="padding:24px;text-align:center;color:var(--gray)">Nessuna procedura</div>';else fl.forEach(function(p){h+='<div class="proc-row" onclick="openDetail(\''+p.id+'\')"><div><div class="proc-title">'+p.title+'</div><div class="proc-date">📅 '+p.date+' · '+p.creator+'</div></div><span class="proc-area" style="font-size:.8rem;color:var(--gray)">'+p.area+'</span><span class="proc-tipo" style="font-size:.8rem;color:var(--gray)">'+p.tipo+'</span><span class="badge '+p.stato+'">'+p.stato+'</span><div onclick="event.stopPropagation()">'+(ia?'<button class="btn-icon" onclick="openEditModal(\''+p.id+'\')">✏️</button><button class="btn-icon" onclick="deleteProc(\''+p.id+'\')">🗑️</button>':'—')+'</div></div>';});h+='</div>';document.getElementById('mainContent').innerHTML=h;}
+function openNewModal(){if(currentRole!=='admin')return;editingId=null;generatedContent='';document.getElementById('modalTitle').textContent='Nuova Procedura Operativa';document.getElementById('fTitle').value='';document.getElementById('fDesc').value='';document.getElementById('fStato').value='bozza';document.getElementById('aiResult').style.display='none';document.getElementById('aiResult').innerHTML='';document.getElementById('sopModal').classList.add('open');}
+function openEditModal(id){if(currentRole!=='admin')return;var p=procedures.find(function(x){return x.id===id;});if(!p)return;editingId=id;generatedContent=p.content;document.getElementById('modalTitle').textContent='Modifica Procedura';document.getElementById('fTitle').value=p.title;document.getElementById('fArea').value=p.area;document.getElementById('fTipo').value=p.tipo;document.getElementById('fFreq').value=p.freq||'Ogni turno';document.getElementById('fDesc').value=p.desc||'';document.getElementById('fStato').value=p.stato;var el=document.getElementById('aiResult');el.innerHTML=p.content?md(p.content):'';el.style.display=p.content?'block':'none';document.getElementById('sopModal').classList.add('open');}
 function closeModal(){document.getElementById('sopModal').classList.remove('open');}
-async function generateSOP(){
-  var title=document.getElementById('fTitle').value.trim(),desc=document.getElementById('fDesc').value.trim();
-  if(!title&&!desc){alert('Inserisci titolo o descrizione.');return;}
-  var btn=document.getElementById('btnGenerate');
-  btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Generazione…';
-  try{
-    var res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4096,messages:[{role:'user',content:'Sei un esperto di procedure operative in uno stabilimento di imbottigliamento di bevande (Estathè). Genera una SOP professionale per: TITOLO: '+(title||'da determinare')+' | AREA: '+document.getElementById('fArea').value+' | TIPO: '+document.getElementById('fTipo').value+' | DESCRIZIONE: '+(desc||'—')+'. Sezioni obbligatorie: ## 1. SCOPO / ## 2. CAMPO DI APPLICAZIONE / ## 3. RIFERIMENTI / ## 4. DPI RICHIESTI / ## 5. MATERIALI E ATTREZZATURE / ## 6. PROCEDURA OPERATIVA / ## 7. ANOMALIE E AZIONI CORRETTIVE / ## 8. NOTE DI SICUREZZA. Usa ## per titoli sezione, ### per sottosezioni, **grassetto** per valori critici. Non usare ---.'}]})});
-    var data=await res.json();
-    generatedContent=data.content?data.content.map(function(b){return b.text||'';}).join(''):'';
-    var el=document.getElementById('aiResult');
-    el.innerHTML=md(generatedContent);el.style.display='block';
-  }catch(e){alert('Errore AI. Riprova.');}
-  btn.disabled=false;btn.innerHTML='✨ Rigenera SOP con AI';
-}
-function saveSOP(){
-  var title=document.getElementById('fTitle').value.trim();
-  if(!title){alert('Inserisci il titolo.');return;}
-  if(!generatedContent&&!editingId){alert('Genera prima la SOP con AI.');return;}
-  var now=new Date().toLocaleDateString('it-IT');
-  if(editingId){
-    var idx=procedures.findIndex(function(p){return p.id===editingId;});
-    procedures[idx]=Object.assign({},procedures[idx],{title:title,area:document.getElementById('fArea').value,tipo:document.getElementById('fTipo').value,freq:document.getElementById('fFreq').value,desc:document.getElementById('fDesc').value,stato:document.getElementById('fStato').value,content:generatedContent||procedures[idx].content});
-  }else{
-    procedures.unshift({id:'sop_'+Date.now(),title:title,area:document.getElementById('fArea').value,tipo:document.getElementById('fTipo').value,freq:document.getElementById('fFreq').value,desc:document.getElementById('fDesc').value,stato:document.getElementById('fStato').value,content:generatedContent,date:now,creator:CREATOR});
-  }
-  showToast('✅ Procedura salvata!');
-  closeModal();showPage(currentPage);
-}
-function openDetail(id){
-  var p=procedures.find(function(x){return x.id===id;});if(!p) return;
-  var isAdmin=currentRole==='admin';
-  document.getElementById('detailContent').innerHTML=
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-chiudi" onclick="closeDetail()">✕ Chiudi</button></div>'+
-    '<div class="detail-header"><h2>'+p.title+'</h2><span class="badge '+p.stato+'" style="font-size:.85rem;padding:4px 12px">'+p.stato+'</span></div>'+
-    '<div class="detail-meta"><span>📍 <strong>'+p.area+'</strong></span><span>🔧 <strong>'+p.tipo+'</strong></span><span>🔁 <strong>'+(p.freq||'—')+'</strong></span><span>📅 <strong>'+p.date+'</strong></span><span>👤 <strong>'+p.creator+'</strong></span></div>'+
-    '<div class="sop-content">'+md(p.content)+'</div>'+
-    '<div class="detail-actions">'+(isAdmin?'<button class="btn-del" onclick="deleteProc(\''+p.id+'\');closeDetail()">🗑️ Elimina</button><button class="btn-edit" onclick="closeDetail();openEditModal(\''+p.id+'\')">✏️ Modifica</button>':'')+
-    '<button class="btn-print" onclick="printSOP()">🖨️ Stampa</button><button class="btn-chiudi" onclick="closeDetail()">✕ Chiudi</button></div>';
-  document.getElementById('detailModal').classList.add('open');
-  setTimeout(function(){document.querySelector('#detailModal .modal').scrollTop=0;},50);
-}
+async function generateSOP(){var ti=document.getElementById('fTitle').value.trim(),de=document.getElementById('fDesc').value.trim();if(!ti&&!de){alert('Inserisci titolo o descrizione.');return;}var btn=document.getElementById('btnGenerate');btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Generazione…';try{var r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4096,messages:[{role:'user',content:'Sei un esperto di procedure operative in uno stabilimento di imbottigliamento di bevande (Estathè). Genera una SOP professionale per: TITOLO: '+(ti||'da determinare')+' | AREA: '+document.getElementById('fArea').value+' | TIPO: '+document.getElementById('fTipo').value+' | DESCRIZIONE: '+(de||'—')+'. Sezioni: ## 1. SCOPO / ## 2. CAMPO DI APPLICAZIONE / ## 3. RIFERIMENTI / ## 4. DPI RICHIESTI / ## 5. MATERIALI E ATTREZZATURE / ## 6. PROCEDURA OPERATIVA / ## 7. ANOMALIE E AZIONI CORRETTIVE / ## 8. NOTE DI SICUREZZA. Usa ## per titoli, ### per sottosezioni, **grassetto** per valori critici. Non usare ---.'}]})});var d=await r.json();generatedContent=d.content?d.content.map(function(b){return b.text||'';}).join(''):'';var el=document.getElementById('aiResult');el.innerHTML=md(generatedContent);el.style.display='block';}catch(e){alert('Errore AI.');}btn.disabled=false;btn.innerHTML='✨ Rigenera SOP con AI';}
+function saveSOP(){var ti=document.getElementById('fTitle').value.trim();if(!ti){alert('Inserisci il titolo.');return;}if(!generatedContent&&!editingId){alert('Genera prima la SOP.');return;}var now=new Date().toLocaleDateString('it-IT');if(editingId){var ix=procedures.findIndex(function(p){return p.id===editingId;});procedures[ix]=Object.assign({},procedures[ix],{title:ti,area:document.getElementById('fArea').value,tipo:document.getElementById('fTipo').value,freq:document.getElementById('fFreq').value,desc:document.getElementById('fDesc').value,stato:document.getElementById('fStato').value,content:generatedContent||procedures[ix].content});}else{procedures.unshift({id:'sop_'+Date.now(),title:ti,area:document.getElementById('fArea').value,tipo:document.getElementById('fTipo').value,freq:document.getElementById('fFreq').value,desc:document.getElementById('fDesc').value,stato:document.getElementById('fStato').value,content:generatedContent,date:now,creator:CREATOR});}showToast('✅ Procedura salvata!');closeModal();showPage(currentPage);}
+function openDetail(id){var p=procedures.find(function(x){return x.id===id;});if(!p)return;var ia=currentRole==='admin';document.getElementById('detailContent').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-chiudi" onclick="closeDetail()">✕ Chiudi</button></div><div class="detail-header"><h2>'+p.title+'</h2><span class="badge '+p.stato+'" style="font-size:.85rem;padding:4px 12px">'+p.stato+'</span></div><div class="detail-meta"><span>📍 <strong>'+p.area+'</strong></span><span>🔧 <strong>'+p.tipo+'</strong></span><span>🔁 <strong>'+(p.freq||'—')+'</strong></span><span>📅 <strong>'+p.date+'</strong></span><span>👤 <strong>'+p.creator+'</strong></span></div><div class="sop-content">'+md(p.content)+'</div><div class="detail-actions">'+(ia?'<button class="btn-del" onclick="deleteProc(\''+p.id+'\');closeDetail()">🗑️ Elimina</button><button class="btn-edit" onclick="closeDetail();openEditModal(\''+p.id+'\')">✏️ Modifica</button>':'')+'<button class="btn-print" onclick="printSOP()">🖨️ Stampa</button><button class="btn-chiudi" onclick="closeDetail()">✕ Chiudi</button></div>';document.getElementById('detailModal').classList.add('open');setTimeout(function(){document.querySelector('#detailModal .modal').scrollTop=0;},50);}
 function closeDetail(){document.getElementById('detailModal').classList.remove('open');}
 function printSOP(){window.print();}
-function deleteProc(id){
-  if(currentRole!=='admin') return;
-  if(!confirm('Eliminare questa procedura?')) return;
-  procedures=procedures.filter(function(p){return p.id!==id;});
-  showPage(currentPage);
-}
+function deleteProc(id){if(currentRole!=='admin')return;if(!confirm('Eliminare questa procedura?'))return;procedures=procedures.filter(function(p){return p.id!==id;});showPage(currentPage);}
 </script>
 </body>
 </html>
